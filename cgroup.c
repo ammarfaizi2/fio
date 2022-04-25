@@ -114,6 +114,8 @@ void cgroup_kill(struct flist_head *clist)
 static char *get_cgroup_root(struct thread_data *td, struct cgroup_mnt *mnt)
 {
 	char *str = malloc(64);
+	if (!str)
+		return NULL;
 
 	if (td->o.cgroup)
 		sprintf(str, "%s/%s", mnt->path, td->o.cgroup);
@@ -178,6 +180,8 @@ int cgroup_setup(struct thread_data *td, struct flist_head *clist, struct cgroup
 	 * Create container, if it doesn't exist
 	 */
 	root = get_cgroup_root(td, *mnt);
+	if (!root)
+		return 1;
 	if (mkdir(root, 0755) < 0) {
 		int __e = errno;
 
