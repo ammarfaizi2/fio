@@ -2430,6 +2430,10 @@ void __show_run_stats(void)
 	struct flist_head **opt_lists;
 
 	runstats = malloc(sizeof(struct group_run_stats) * (groupid + 1));
+	if (!runstats) {
+		log_err("fio: failed to allocate runstats\n");
+		return;
+	}
 
 	for (i = 0; i < groupid + 1; i++)
 		init_group_run_stat(&runstats[i]);
@@ -2455,7 +2459,16 @@ void __show_run_stats(void)
 	}
 
 	threadstats = malloc(nr_ts * sizeof(struct thread_stat));
+	if (!threadstats) {
+		log_err("fio: failed to allocate threadstats\n");
+		return;
+	}
+
 	opt_lists = malloc(nr_ts * sizeof(struct flist_head *));
+	if (!opt_lists) {
+		log_err("fio: failed to allocate opt_lists\n");
+		return;
+	}
 
 	for (i = 0; i < nr_ts; i++) {
 		init_thread_stat(&threadstats[i]);
