@@ -1370,9 +1370,9 @@ static int fio_netio_setup(struct thread_data *td)
 	}
 
 	if (!td->io_ops_data) {
-		nd = malloc(sizeof(*nd));
-
-		memset(nd, 0, sizeof(*nd));
+		nd = calloc(1, sizeof(*nd));
+		if (!nd)
+			return 1;
 		nd->listenfd = -1;
 		nd->pipes[0] = nd->pipes[1] = -1;
 		td->io_ops_data = nd;
@@ -1391,7 +1391,8 @@ static int fio_netio_setup_splice(struct thread_data *td)
 {
 	struct netio_data *nd;
 
-	fio_netio_setup(td);
+	if (fio_netio_setup(td))
+		return 1;
 
 	nd = td->io_ops_data;
 	if (nd) {
