@@ -858,6 +858,8 @@ static int calc_block_percentiles(int nr_block_infos, uint32_t *block_infos,
 		return 0;
 
 	*percentiles = calloc(len, sizeof(**percentiles));
+	if (!*percentiles)
+		return 0;
 
 	for (i = 0; i < len; i++) {
 		int idx = (plist[i].u.f * (nr_block_infos - nr_uninit) / 100)
@@ -2429,7 +2431,11 @@ void __show_run_stats(void)
 	struct buf_output output[FIO_OUTPUT_NR];
 	struct flist_head **opt_lists;
 
-	runstats = malloc(sizeof(struct group_run_stats) * (groupid + 1));
+	runstats = malloc((groupid + 1) * sizeof(*runstats));
+	if (!runstats) {
+		log_err("fio: failed to allocate runstats\n");
+		return;
+	}
 
 	for (i = 0; i < groupid + 1; i++)
 		init_group_run_stat(&runstats[i]);
@@ -2454,13 +2460,20 @@ void __show_run_stats(void)
 		nr_ts++;
 	}
 
-	threadstats = malloc(nr_ts * sizeof(struct thread_stat));
-	opt_lists = malloc(nr_ts * sizeof(struct flist_head *));
-
-	for (i = 0; i < nr_ts; i++) {
-		init_thread_stat(&threadstats[i]);
-		opt_lists[i] = NULL;
+	threadstats = malloc(nr_ts * sizeof(*threadstats));
+	if (!threadstats) {
+		log_err("fio: failed to allocate threadstats\n");
+		goto out_free_runstats;
 	}
+
+	opt_lists = calloc(nr_ts, sizeof(*opt_lists));
+	if (!opt_lists) {
+		log_err("fio: failed to allocate opt_lists\n");
+		goto out_free_threadstats;
+	}
+
+	for (i = 0; i < nr_ts; i++)
+		init_thread_stat(&threadstats[i]);
 
 	init_per_prio_stats(threadstats, nr_ts);
 
@@ -2709,15 +2722,18 @@ void __show_run_stats(void)
 	fio_idle_prof_cleanup();
 
 	log_info_flush();
-	free(runstats);
 
 	/* free arrays allocated by sum_thread_stats(), if any */
 	for (i = 0; i < nr_ts; i++) {
 		ts = &threadstats[i];
 		free_clat_prio_stats(ts);
 	}
-	free(threadstats);
+
 	free(opt_lists);
+out_free_threadstats:
+	free(threadstats);
+out_free_runstats:
+	free(runstats);
 }
 
 int __show_running_run_stats(void)
@@ -2729,7 +2745,10 @@ int __show_running_run_stats(void)
 
 	fio_sem_down(stat_sem);
 
-	rt = malloc(thread_number * sizeof(unsigned long long));
+	rt = malloc(thread_number * sizeof(*rt));
+	if (!rt)
+		return 1;
+
 	fio_gettime(&ts, NULL);
 
 	for_each_td(td, i) {
@@ -3331,6 +3350,8 @@ void add_clat_sample(struct thread_data *td, enum fio_ddir ddir,
 			 */
 			io_u_plat = (uint64_t *) td->ts.io_u_plat[FIO_CLAT][ddir];
 			dst = malloc(sizeof(struct io_u_plat_entry));
+			if (!dst)
+				goto out;
 			memcpy(&(dst->io_u_plat), io_u_plat,
 				FIO_IO_U_PLAT_NR * sizeof(uint64_t));
 			flist_add(&dst->list, &hw->list);
@@ -3347,6 +3368,7 @@ void add_clat_sample(struct thread_data *td, enum fio_ddir ddir,
 		}
 	}
 
+out:
 	if (needs_lock)
 		__td_io_u_unlock(td);
 }
