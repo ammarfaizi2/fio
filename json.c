@@ -56,7 +56,7 @@ static char *strdup_escape(const char *str)
 	char *p, *ret;
 	int escapes;
 
-	if (!strlen(str))
+	if (!str[0])
 		return NULL;
 
 	escapes = 0;
