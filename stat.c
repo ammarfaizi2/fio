@@ -2429,7 +2429,11 @@ void __show_run_stats(void)
 	struct buf_output output[FIO_OUTPUT_NR];
 	struct flist_head **opt_lists;
 
-	runstats = malloc(sizeof(struct group_run_stats) * (groupid + 1));
+	runstats = calloc(groupid + 1, sizeof(*runstats));
+	if (!runstats) {
+		log_err("fio: failed to allocate runstats\n");
+		return;
+	}
 
 	for (i = 0; i < groupid + 1; i++)
 		init_group_run_stat(&runstats[i]);
@@ -2454,13 +2458,20 @@ void __show_run_stats(void)
 		nr_ts++;
 	}
 
-	threadstats = malloc(nr_ts * sizeof(struct thread_stat));
-	opt_lists = malloc(nr_ts * sizeof(struct flist_head *));
-
-	for (i = 0; i < nr_ts; i++) {
-		init_thread_stat(&threadstats[i]);
-		opt_lists[i] = NULL;
+	threadstats = calloc(nr_ts, sizeof(*threadstats));
+	if (!threadstats) {
+		log_err("fio: failed to allocate threadstats\n");
+		goto out_free_runstats;
 	}
+
+	opt_lists = calloc(nr_ts, sizeof(*opt_lists));
+	if (!opt_lists) {
+		log_err("fio: failed to allocate opt_lists\n");
+		goto out_free_threadstats;
+	}
+
+	for (i = 0; i < nr_ts; i++)
+		init_thread_stat(&threadstats[i]);
 
 	init_per_prio_stats(threadstats, nr_ts);
 
@@ -2709,15 +2720,18 @@ void __show_run_stats(void)
 	fio_idle_prof_cleanup();
 
 	log_info_flush();
-	free(runstats);
 
 	/* free arrays allocated by sum_thread_stats(), if any */
 	for (i = 0; i < nr_ts; i++) {
 		ts = &threadstats[i];
 		free_clat_prio_stats(ts);
 	}
-	free(threadstats);
+
 	free(opt_lists);
+out_free_threadstats:
+	free(threadstats);
+out_free_runstats:
+	free(runstats);
 }
 
 int __show_running_run_stats(void)
