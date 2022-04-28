@@ -700,13 +700,17 @@ static int write_trace(FILE *fp, struct blk_io_trace *t)
 
 int merge_blktrace_iologs(struct thread_data *td)
 {
+	int nr_logs_iter;
 	int nr_logs = get_max_str_idx(td->o.read_iolog_file);
-	struct blktrace_cursor *bcs = malloc(sizeof(struct blktrace_cursor) *
-					     nr_logs);
+	struct blktrace_cursor *bcs;
 	struct blktrace_cursor *bc;
 	FILE *merge_fp;
 	char *str, *ptr, *name, *merge_buf;
 	int i, ret;
+
+	bcs = calloc(nr_logs, sizeof(struct blktrace_cursor));
+	if (!bcs)
+		return -ENOMEM;
 
 	ret = init_merge_param_list(td->o.merge_blktrace_scalars, bcs, nr_logs,
 				    100, offsetof(struct blktrace_cursor,
@@ -714,7 +718,7 @@ int merge_blktrace_iologs(struct thread_data *td)
 	if (ret) {
 		log_err("fio: merge_blktrace_scalars(%d) != nr_logs(%d)\n",
 			ret, nr_logs);
-		goto err_param;
+		goto out_free_bcs;
 	}
 
 	ret = init_merge_param_list(td->o.merge_blktrace_iters, bcs, nr_logs,
@@ -723,83 +727,96 @@ int merge_blktrace_iologs(struct thread_data *td)
 	if (ret) {
 		log_err("fio: merge_blktrace_iters(%d) != nr_logs(%d)\n",
 			ret, nr_logs);
-		goto err_param;
+		goto out_free_bcs;
 	}
 
 	/* setup output file */
 	merge_fp = fopen(td->o.merge_blktrace_file, "w");
+	if (!merge_fp) {
+		ret = -errno;
+		goto out_free_bcs;
+	}
+
 	merge_buf = malloc(128 * 1024);
-	if (!merge_buf)
-		goto err_out_file;
+	if (!merge_buf) {
+		ret = -ENOMEM;
+		goto out_close_merge_fp;
+	}
+
 	ret = setvbuf(merge_fp, merge_buf, _IOFBF, 128 * 1024);
-	if (ret)
-		goto err_merge_buf;
+	if (ret) {
+		ret = -errno;
+		goto out_free_merge_buf;
+	}
 
 	/* setup input files */
 	str = ptr = strdup(td->o.read_iolog_file);
+	if (!str) {
+		ret = -ENOMEM;
+		goto out_free_merge_buf;
+	}
+
 	nr_logs = 0;
 	for (i = 0; (name = get_next_str(&ptr)) != NULL; i++) {
 		bcs[i].f = fopen(name, "rb");
 		if (!bcs[i].f) {
 			log_err("fio: could not open file: %s\n", name);
 			ret = -errno;
-			free(str);
-			goto err_file;
+			goto out_close_bcs_files;
 		}
 		nr_logs++;
 
 		if (!is_blktrace(name, &bcs[i].swap)) {
 			log_err("fio: file is not a blktrace: %s\n", name);
-			free(str);
-			goto err_file;
+			goto out_close_bcs_files;
 		}
 
 		ret = read_trace(td, &bcs[i]);
 		if (ret < 0) {
-			free(str);
-			goto err_file;
+			goto out_close_bcs_files;
 		} else if (!ret) {
 			merge_finish_file(bcs, i, &nr_logs);
 			i--;
 		}
 	}
-	free(str);
 
 	/* merge files */
-	while (nr_logs) {
-		i = find_earliest_io(bcs, nr_logs);
+	nr_logs_iter = nr_logs;
+	while (nr_logs_iter) {
+		i = find_earliest_io(bcs, nr_logs_iter);
 		bc = &bcs[i];
 		/* skip over the pdu */
 		ret = discard_pdu(bc->f, &bc->t);
 		if (ret < 0) {
 			td_verror(td, -ret, "blktrace lseek");
-			goto err_file;
+			goto out_close_bcs_files;
 		}
 
 		ret = write_trace(merge_fp, &bc->t);
 		ret = read_trace(td, bc);
 		if (ret < 0)
-			goto err_file;
+			goto out_close_bcs_files;
 		else if (!ret)
-			merge_finish_file(bcs, i, &nr_logs);
+			merge_finish_file(bcs, i, &nr_logs_iter);
 	}
 
 	/* set iolog file to read from the newly merged file */
 	td->o.read_iolog_file = td->o.merge_blktrace_file;
 	ret = 0;
 
-err_file:
-	/* cleanup */
-	for (i = 0; i < nr_logs; i++) {
+out_close_bcs_files:
+	for (i = 0; i < nr_logs; i++)
 		fclose(bcs[i].f);
-	}
-err_merge_buf:
+	free(str);
+
+out_free_merge_buf:
 	free(merge_buf);
-err_out_file:
+
+out_close_merge_fp:
 	fflush(merge_fp);
 	fclose(merge_fp);
-err_param:
-	free(bcs);
 
+out_free_bcs:
+	free(bcs);
 	return ret;
 }
