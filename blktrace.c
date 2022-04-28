@@ -80,11 +80,15 @@ bool is_blktrace(const char *filename, int *need_swap)
 #define FMAJOR(dev)	((unsigned int) ((dev) >> FMINORBITS))
 #define FMINOR(dev)	((unsigned int) ((dev) & FMINORMASK))
 
-static void trace_add_open_close_event(struct thread_data *td, int fileno, enum file_log_act action)
+static void trace_add_open_close_event(struct thread_data *td, int fileno,
+				       enum file_log_act action)
 {
 	struct io_piece *ipo;
 
 	ipo = calloc(1, sizeof(*ipo));
+	if (!ipo)
+		return;
+
 	init_ipo(ipo);
 
 	ipo->ddir = DDIR_INVAL;
@@ -158,6 +162,9 @@ static void store_ipo(struct thread_data *td, unsigned long long offset,
 	struct io_piece *ipo;
 
 	ipo = calloc(1, sizeof(*ipo));
+	if (!ipo)
+		return;
+
 	init_ipo(ipo);
 
 	ipo->offset = offset * 512;
@@ -211,6 +218,9 @@ static bool handle_trace_discard(struct thread_data *td,
 		return false;
 
 	ipo = calloc(1, sizeof(*ipo));
+	if (!ipo)
+		return false;
+
 	init_ipo(ipo);
 	fileno = trace_add_file(td, t->device, cache);
 
@@ -288,6 +298,9 @@ static bool handle_trace_flush(struct thread_data *td, struct blk_io_trace *t,
 		return false;
 
 	ipo = calloc(1, sizeof(*ipo));
+	if (!ipo)
+		return false;
+
 	init_ipo(ipo);
 	fileno = trace_add_file(td, t->device, cache);
 
