@@ -338,9 +338,16 @@ static void __fio_client_add_cmd_option(struct fio_client *client,
 					const char *opt)
 {
 	int index;
+	void *tmp;
 
 	index = client->argc++;
-	client->argv = realloc(client->argv, sizeof(char *) * client->argc);
+	tmp = realloc(client->argv, sizeof(char *) * client->argc);
+	if (!tmp) {
+		log_err("fio: cannot reallocate client->argv in %s\n", __func__);
+		return;
+	}
+
+	client->argv = tmp;
 	client->argv[index] = strdup(opt);
 	dprint(FD_NET, "client: add cmd %d: %s\n", index, opt);
 }
@@ -1535,12 +1542,17 @@ static void handle_start(struct fio_client *client, struct fio_net_cmd *cmd)
 	client->nr_stat = le32_to_cpu(pdu->stat_outputs);
 
 	if (client->jobs) {
+		void *tmp;
 		int i;
 
-		if (client->opt_lists)
+		tmp = realloc(client->opt_lists,
+			      client->jobs * sizeof(struct flist_head));
+		if (!tmp) {
 			free(client->opt_lists);
+			return;
+		}
+		client->opt_lists = tmp;
 
-		client->opt_lists = malloc(client->jobs * sizeof(struct flist_head));
 		for (i = 0; i < client->jobs; i++)
 			INIT_FLIST_HEAD(&client->opt_lists[i]);
 	}
@@ -1750,7 +1762,11 @@ fail:
 	}
 
 	size += sb.st_size;
-	rep = realloc(rep, size);
+	tmp = realloc(rep, size);
+	if (!tmp)
+		goto fail;
+
+	rep = tmp;
 	rep->size = cpu_to_le32((uint32_t) sb.st_size);
 
 	fd = open((char *)pdu->path, O_RDONLY);
