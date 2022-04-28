@@ -80,14 +80,14 @@ bool is_blktrace(const char *filename, int *need_swap)
 #define FMAJOR(dev)	((unsigned int) ((dev) >> FMINORBITS))
 #define FMINOR(dev)	((unsigned int) ((dev) & FMINORMASK))
 
-static void trace_add_open_close_event(struct thread_data *td, int fileno,
-				       enum file_log_act action)
+static int trace_add_open_close_event(struct thread_data *td, int fileno,
+				      enum file_log_act action)
 {
 	struct io_piece *ipo;
 
 	ipo = calloc(1, sizeof(*ipo));
 	if (!ipo)
-		return;
+		return -ENOMEM;
 
 	init_ipo(ipo);
 
@@ -95,6 +95,7 @@ static void trace_add_open_close_event(struct thread_data *td, int fileno,
 	ipo->fileno = fileno;
 	ipo->file_action = action;
 	flist_add_tail(&ipo->list, &td->io_log_list);
+	return 0;
 }
 
 static int trace_add_file(struct thread_data *td, __u32 device,
@@ -124,6 +125,7 @@ static int trace_add_file(struct thread_data *td, __u32 device,
 	strcpy(dev, "/dev");
 	if (blktrace_lookup_device(td->o.replay_redirect, dev, maj, min)) {
 		int fileno;
+		int err;
 
 		if (td->o.replay_redirect)
 			dprint(FD_BLKTRACE, "device lookup: %d/%d\n overridden"
@@ -137,7 +139,9 @@ static int trace_add_file(struct thread_data *td, __u32 device,
 		td->o.open_files++;
 		td->files[fileno]->major = maj;
 		td->files[fileno]->minor = min;
-		trace_add_open_close_event(td, fileno, FIO_LOG_OPEN_FILE);
+		err = trace_add_open_close_event(td, fileno, FIO_LOG_OPEN_FILE);
+		if (err < 0)
+			return err;
 		cache->fileno = fileno;
 	}
 
@@ -217,12 +221,15 @@ static bool handle_trace_discard(struct thread_data *td,
 	if (td->o.replay_skip & (1u << DDIR_TRIM))
 		return false;
 
+	fileno = trace_add_file(td, t->device, cache);
+	if (fileno < 0)
+		return false;
+
 	ipo = calloc(1, sizeof(*ipo));
 	if (!ipo)
 		return false;
 
 	init_ipo(ipo);
-	fileno = trace_add_file(td, t->device, cache);
 
 	ios[DDIR_TRIM]++;
 	if (t->bytes > bs[DDIR_TRIM])
@@ -261,6 +268,8 @@ static bool handle_trace_fs(struct thread_data *td, struct blk_io_trace *t,
 	int fileno;
 
 	fileno = trace_add_file(td, t->device, cache);
+	if (fileno < 0)
+		return false;
 
 	rw = (t->action & BLK_TC_ACT(BLK_TC_WRITE)) != 0;
 
@@ -297,12 +306,15 @@ static bool handle_trace_flush(struct thread_data *td, struct blk_io_trace *t,
 	if (td->o.replay_skip & (1u << DDIR_SYNC))
 		return false;
 
+	fileno = trace_add_file(td, t->device, cache);
+	if (fileno < 0)
+		return false;
+
 	ipo = calloc(1, sizeof(*ipo));
 	if (!ipo)
 		return false;
 
 	init_ipo(ipo);
-	fileno = trace_add_file(td, t->device, cache);
 
 	ipo->delay = ttime / 1000;
 	ipo->ddir = DDIR_SYNC;
@@ -560,8 +572,14 @@ bool read_blktrace(struct thread_data* td)
 		return true;
 	}
 
-	for_each_file(td, fiof, i)
-		trace_add_open_close_event(td, fiof->fileno, FIO_LOG_CLOSE_FILE);
+	for_each_file(td, fiof, i) {
+		int err;
+
+		err = trace_add_open_close_event(td, fiof->fileno,
+						 FIO_LOG_CLOSE_FILE);
+		if (err < 0)
+			goto err;
+	}
 
 	fclose(td->io_log_rfile);
 	td->io_log_rfile = NULL;
